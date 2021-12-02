@@ -1,31 +1,40 @@
 import torch
 import torch.nn as nn 
 import torch.nn.functional as F
+from torch.nn.modules.dropout import Dropout
+
 
 
 class MLP(nn.Module):
-    def __init__(self, input_size: int, output_size: int, hidden_sizes: list, act: str, device='cuda'):
+    def __init__(self, input_size: int, output_size: int, hidden_sizes: list, act: str, with_bn=False, with_do=False):
         super(MLP, self).__init__()
         num_hidden = len(hidden_sizes)
         assert(num_hidden >= 1)
-        self.fc = nn.ModuleList()
-        self.fc.extend([nn.Linear(input_size, hidden_sizes[0], device=device)])
+
+        def get_block(input_size, output_size):
+            if act == 'relu':
+                act_fn = nn.ReLU()  
+            elif act == 'tanh':
+                act_fn = nn.Tanh()
+            else:
+                assert False
+            block = [
+                nn.Linear(input_size, output_size),
+                act_fn
+            ]
+            if with_bn:
+                block.insert(1, nn.BatchNorm1d(output_size))
+            if with_do:
+                block.append(nn.Dropout())
+            return block
+
+        self.fc = []
+        self.fc += get_block(input_size, hidden_sizes[0])
         if num_hidden > 1:
             for i in range(1, num_hidden):
-                self.fc.extend([nn.Linear(hidden_sizes[i - 1], hidden_sizes[i], device=device)])
-                self.fc.extend([nn.Dropout(p=0.5)])
-        self.fc.extend([nn.Linear(hidden_sizes[-1], output_size, device=device)])
-        if act == 'relu':
-            self.act = F.relu   
-        elif act == 'tanh':
-            self.act = torch.tanh
-        else:
-            assert False
+                self.fc += get_block(hidden_sizes[i - 1], hidden_sizes[i])
+        self.fc += get_block(hidden_sizes[-1], output_size)
+        self.fc = nn.Sequential(*self.fc)
 
     def forward(self, x):
-        for i, fc in enumerate(self.fc):
-            x = fc(x)
-            if i < len(self.fc) - 1:
-                x = self.act(x)
-
-        return x
+        return self.fc(x)
